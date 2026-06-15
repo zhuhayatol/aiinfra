@@ -47,3 +47,21 @@ def test_empty_and_short_text():
 
     assert tokenizer.decode(tokenizer.encode("")) == ""
     assert tokenizer.decode(tokenizer.encode("a")) == "a"
+
+def test_save_load_minbpe_style(tmp_path):
+    text = "def train(self, text, vocab_size, verbose=False)"
+
+    tokenizer = BPETokenizer()
+    tokenizer.train(text, vocab_size=270)
+
+    prefix = str(tmp_path / "toy")
+    tokenizer.save(prefix)
+
+    tokenizer2 = BPETokenizer()
+    tokenizer2.load(prefix + ".model")
+
+    assert tokenizer2.encode(text) == tokenizer.encode(text)
+    assert tokenizer2.decode(tokenizer2.encode(text)) == text
+
+    assert (tmp_path / "toy.model").exists()
+    assert (tmp_path / "toy.vocab").exists()

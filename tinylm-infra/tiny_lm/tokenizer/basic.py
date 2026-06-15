@@ -11,10 +11,16 @@ class BPETokenizer(Tokenizer):
         num_merge = vocab_size - 256
         
         for i in range(num_merge):
+
             stats = get_stats(text)
+            if not stats:
+                break
+
             pair =  max(stats, key=lambda p: stats.get(p, 0))
+
             if verbose:
                 print(f"the pair {pair} is merged to count {256 + i}")
+
             text = merge(text, pair, 256 + i)
             merges[pair] = 256 + i
 
@@ -51,6 +57,8 @@ class BPETokenizer(Tokenizer):
 #     text1 = "def self"
 #     print(f"text1 = {list(text1.encode('utf-8'))}")
 #     a = BPETokenizer()
-#     a.train(text, vocab_size=262, verbose=True)
+#     # a.train(text, vocab_size=262, verbose=True)
+#     a.load("hayatol.model")
 #     print(a.print_merge())
 #     print(a.decode(a.encode(text1)) == text1)
+    
