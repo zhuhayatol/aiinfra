@@ -19,9 +19,9 @@ def merge(tokens:list, pair:tuple[int, int] , count:int):
 class Tokenizer:
     def __init__(self):
         self.merges:dict[tuple, int] = {}
-        self.vocab:dict[int, bytes] = self._build_vocab_()
         self.pattern:str = ""
         self.special_tokens:dict[str, int] = {}
+        self.vocab:dict[int, bytes] = self._build_vocab_()
 
     def train(self, text, vocab_size, verbose=False):
         raise NotImplementedError
@@ -41,6 +41,9 @@ class Tokenizer:
         vocab = {idx: bytes([idx]) for idx in range(256)}
         for (p0, p1), idx in self.merges.items():
             vocab[idx] = vocab[p0] + vocab[p1]
+            
+        for special_token, special_id in self.special_tokens.items():
+            vocab[special_id] = special_token.encode('utf-8')
         return vocab
     
     def print_merge(self):
@@ -63,7 +66,7 @@ class Tokenizer:
             f.write(f"{len(self.special_tokens)}\n")
 
             for special, idx in self.special_tokens.items():
-                f.write(f"{special} {idx} \n") 
+                f.write(f"{special} {idx}\n") 
             for p0, p1 in self.merges:
                 f.write(f"{p0} {p1}\n")
 
@@ -86,9 +89,8 @@ class Tokenizer:
             self.special_tokens = {}
 
             for _ in range(num_special):
-                line = f.readline().rstrip("\n")
+                line = f.readline().strip("\n")
                 special, idx = line.rsplit(" ", 1)
-                self.special_tokens[special] = int(idx)
                 self.special_tokens[special] = int(idx)
 
             self.merges = {}

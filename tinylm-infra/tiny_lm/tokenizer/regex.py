@@ -8,7 +8,16 @@ class RegexTokenizer(Tokenizer):
         super().__init__()
         self.pattern = GPT4_SPLIT_PATTERN if pattern is None else pattern
         self.compiled_pattern = re.compile(self.pattern)
-    
+        self.special_tokens:dict[str, int] = {}
+        self.inverse_special_tokens = {}
+
+    def register_special_tokens(self, special_tokens):
+        # special_tokens is a dictionary of str -> int
+        # example: {"<|endoftext|>": 100257}
+        self.special_tokens = special_tokens
+        self.inverse_special_tokens = {v: i for i, v in self.special_tokens.items()}
+        self.vocab = self._build_vocab_()
+
     def train(self, text, vocab_size, verbose=False):
         """
         首先是把文本通过regex切分为块，
@@ -54,7 +63,7 @@ class RegexTokenizer(Tokenizer):
         self.vocab  = self._build_vocab_()
 
         # print([j for i, j in self.vocab.items() if i > 255])
-    
+
     def encode_chunk(self, chunk:str) -> list[int]:
         chunk_list = list(map(int, chunk.encode("utf-8")))
         
@@ -71,12 +80,13 @@ class RegexTokenizer(Tokenizer):
             chunk_list = merge(chunk_list, pair, self.merges[pair])
         return chunk_list
 
-    def encode(self, text:str) -> list[int]:
+    def encode_ordinary(self, text:str) -> list[int]:
         """
-        encode的过程：
+        encode_ordinary的过程：
         首先使用regex分块，
         随后再块内分别根据merges来编码合并，
         最后将多个块全部合并
+        (不考虑这个special_tokens)
         """
         text_regex = re.findall(self.compiled_pattern, text)
         
@@ -88,3 +98,32 @@ class RegexTokenizer(Tokenizer):
         
         return tokens 
     
+
+    def encode(self, text, allowed_special="none_raise"):
+        special = {}
+        if allowed_special == "none_raise":
+            for i,j in self.special_tokens.items():
+                if i in text:
+                    raise ValueError("wo dont need any special token!")
+            return self.encode_ordinary(text)
+        elif allowed_special == "none":
+            return self.encode_ordinary(text)
+        elif allowed_special == "all":
+            specials = self.special_tokens
+        elif isinstance(allowed_special, set):
+            specials = {k:v for k,v in self.special_tokens.items() if k in allowed_special}
+        else:
+            raise ValueError(f"allowed_special={allowed_special} not understood")
+        
+        # 从text中分离出special中的所有元素
+        special_tokens_sorted = sorted(specials, key=len, reverse=True)
+        special_pattern = "(" + "|".join(re.escape(k) for k in special_tokens_sorted) + ")"
+        special_chunks = re.split(special_pattern, text)
+
+        tokens = []
+        for sc in special_chunks:
+            if sc in specials:
+                tokens.append(specials[sc])
+            else:
+                tokens.extend(self.encode_ordinary(sc))
+        return tokens
