@@ -7,7 +7,7 @@
 训练流程如下：
 
 * 将输入文本通过 UTF-8 编码转换为 bytes，再把 bytes 转成整数列表。由于 byte 的取值范围是 `0~255`，所以 byte-level BPE 的基础词表大小是 256。
-* 统计当前 token 序列中所有相邻 pair 的出现频次。
+* 使用函数 `get_stats` 统计当前 token 序列中所有相邻 pair 的出现频次。
 * 选择出现频次最高的 pair，将它合并成一个新的 token id。
 * 新 token id 从 256 开始编号。每做一次新的 merge，就产生一个新的 token id。
 * 如果一共做 `num_merges` 次合并，那么最终 `vocab_size = 256 + num_merges`。

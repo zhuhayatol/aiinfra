@@ -91,18 +91,13 @@ BPETokenizer 继承 Tokenizer，主要补全 Basic BPE 的 train 和 encode。de
 train和encode中的代码与[byte-level_bpe_tokenizer.md]中的内容几乎没有区别。故不多赘述。
 
 
-## 当前（后删）
-目前完成的是 minbpe 的 Step 1：BasicTokenizer。
+## RegexTokenizer
+(代码在regex.py中)
 
-已经实现：
-- get_stats
-- merge
-- Tokenizer 基类
-- BPETokenizer.train
-- BPETokenizer.encode
-- Tokenizer.decode
-- save / load / save_vocab
-- pytest 测试
+主要包括：`train`, `encode`, `encode_chunk`
 
-下一步是 Step 2：RegexTokenizer。
-核心变化是先用正则表达式把文本切成多个 chunk，然后每个 chunk 内部单独做 BPE，不允许跨 chunk 合并。
+RegexTokenizer 与 BasicTokenizer 的区别是：BasicTokenizer 直接对整段文本做 BPE，而 RegexTokenizer 会先用正则表达式把文本切成多个 chunk，再在每个 chunk 内部单独做 BPE。
+
+训练时，RegexTokenizer 会对每个 chunk 单独统计 pair，然后把所有 chunk 内部的 pair 频次汇总，选择全局最高频 pair 作为新的 merge 规则。合并时也必须对每个 chunk 分别 merge，不能把所有 chunk 拼成一条长序列，否则会产生跨 chunk 边界的 pair。
+
+编码时，RegexTokenizer 先对新文本做 regex 分块，然后对每个 chunk 按已有 merges 的优先级执行 BPE，最后再把所有 chunk 的 token ids 拼接成最终结果。
