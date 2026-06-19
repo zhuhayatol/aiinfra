@@ -64,11 +64,10 @@ class RegexTokenizer(Tokenizer):
 
         # print([j for i, j in self.vocab.items() if i > 255])
 
-    def encode_chunk(self, chunk:str) -> list[int]:
-        chunk_list = list(map(int, chunk.encode("utf-8")))
-        
-        while len(chunk_list) >= 2:
-            stats = get_stats(chunk_list)
+    def encode_chunk(self, chunk) -> list[int]:
+        chunk = list(chunk)
+        while len(chunk) >= 2:
+            stats = get_stats(chunk)
             if stats == {}:
                 break
 
@@ -77,10 +76,10 @@ class RegexTokenizer(Tokenizer):
             if pair not in self.merges:
                 break
             
-            chunk_list = merge(chunk_list, pair, self.merges[pair])
-        return chunk_list
+            chunk = merge(chunk, pair, self.merges[pair])
+        return chunk
 
-    def encode_ordinary(self, text:str) -> list[int]:
+    def encode_ordinary(self, text) -> list[int]:
         """
         encode_ordinary的过程：
         首先使用regex分块，
@@ -90,7 +89,7 @@ class RegexTokenizer(Tokenizer):
         """
         text_regex = re.findall(self.compiled_pattern, text)
         
-        text_chunk = [self.encode_chunk(t) for t in text_regex]
+        text_chunk = [self.encode_chunk(t.encode('utf-8')) for t in text_regex]
 
         tokens = []
         for t in text_chunk:
@@ -116,6 +115,8 @@ class RegexTokenizer(Tokenizer):
             raise ValueError(f"allowed_special={allowed_special} not understood")
         
         # 从text中分离出special中的所有元素
+        if not specials:
+            return self.encode_ordinary(text)
         special_tokens_sorted = sorted(specials, key=len, reverse=True)
         special_pattern = "(" + "|".join(re.escape(k) for k in special_tokens_sorted) + ")"
         special_chunks = re.split(special_pattern, text)
@@ -127,3 +128,9 @@ class RegexTokenizer(Tokenizer):
             else:
                 tokens.extend(self.encode_ordinary(sc))
         return tokens
+    
+    
+    def load(self, model_file):
+        super().load(model_file)
+        self.compiled_pattern = re.compile(self.pattern)
+        self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()}
