@@ -922,3 +922,9 @@ decode()：复用基类 decode
 ```text
 special token 不是 BPE merge 规则，而是 encode 入口处的最高优先级分流规则。
 ```
+
+---
+
+
+
+***Tokenizer 阶段已完成：实现 BasicTokenizer、RegexTokenizer、Special Tokens、GPT4Tokenizer，并通过 encode/decode 与 tiktoken 对齐测试。下一阶段进入 Dataset/get_batch，将文本 token ids 转换为语言模型训练样本。***
