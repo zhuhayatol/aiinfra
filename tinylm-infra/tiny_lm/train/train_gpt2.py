@@ -15,7 +15,7 @@ from tiny_lm.model.gpt2 import GPT, GPTConfig
 # python3 train_gpt2.py
 
 # DDP launch for e.g 4 GPUs:
-# torchrun --standalone --nproc_per_node=8 train_gpt2.py
+# torchrun --standalone --nproc_per_node=4 train_gpt2.py
 
 def main():
 
@@ -63,7 +63,7 @@ def main():
     # 梯度累计的部分
     # 总训练批次
     # DDP 下 global tokens = B * T * grad_accum_steps * ddp_world_size。
-    total_batch_size = 524288 # 2**19, ~0.5M, in number of tokens
+    total_batch_size = 2**15 # 2**19, ~0.5M, in number of tokens
     B = 4 # micro batch size
     T = 512 # sequence length
     assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
@@ -122,10 +122,6 @@ def main():
         coeff = 0.5 * (1.0 + math.cos(math.pi * ratio))
         return min_lr + coeff * (max_lr - min_lr)
 
-    
-    
-  
-    
     # 创建优化器
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
     
@@ -141,7 +137,6 @@ def main():
         loss_accum = 0.0
 
         for step in range(grad_accum_steps):
-
             # 得到下一批次的x，y
             x, y = dataload.next_batch()
             x, y = x.to(device), y.to(device)
