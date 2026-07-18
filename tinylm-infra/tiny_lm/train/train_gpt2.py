@@ -192,6 +192,10 @@ def main():
         # 验证的过程顺便进行一次采样
         if ((step > 0 and step % 50 == 0) or last_step) and (not use_compile):
             model.eval()
+
+            if ddp:
+                dist.barrier()
+
             # 只需要主进程进行采样
             if master_process:
                 # 一条prompt生成的结果次数
@@ -224,10 +228,18 @@ def main():
                 for i in range(num_return_sequences):
                     decoded = enc.decode(y[i].tolist())
                     print(f"sample {i}: {decoded}")
+            
+            if ddp:
+                dist.barrier()
 
         # 顺便也需要进行hellaswag评估
         if (step % 50 == 0 or last_step) and (not use_compile):
             model.eval()
+
+            # 确保所有进程都完成前面的验证和生成阶段，
+            # 再让 rank 0 开始 HellaSwag 评估。
+            if ddp:
+                dist.barrier()
 
             if master_process:
                 hs = evaluate_hellaswag(
@@ -249,6 +261,10 @@ def main():
 
                 with open(log_file, "a") as f:
                     f.write(f"{step} hella {hs['acc']:.4f}\n")
+            
+            # rank 0 完成评估之前，其他进程不能进入下一轮训练。
+            if ddp:
+                dist.barrier()
 
         # 训练过程
         # 采样结束后切回训练模式。

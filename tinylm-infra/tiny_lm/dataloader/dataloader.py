@@ -88,7 +88,7 @@ class DataLoaderLite:
     def num_tokens(self):
         # 如果是加载本地文件
         if self.file_name != None:
-            pass
+            print(f"loaded {len(self.token)} tokens")
         else:
             count_tokens = 0
             for s in self.shards:

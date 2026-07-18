@@ -1,0 +1,9 @@
+torch
+tiktoken
+numpy
+regex
+datasets
+tqdm
+matplotlib
+transformers
+pytest
