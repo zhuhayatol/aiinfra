@@ -157,7 +157,7 @@ class GPT(nn.Module):
     # idx.shape = (1, xxx)
     # 创建idx的时候需要
     # idx = torch.tensor(enc.encode(text), dtype=torch.long)[None, :].to(device)
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, generator=None):
         for _ in range(max_new_tokens):
             # 注意idx的大小：超过blocksize则取最后blocksize个数据
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
@@ -176,7 +176,7 @@ class GPT(nn.Module):
                 logits[logits < topk_probs[:, [-1]]] = -float('inf')
             # 在筛选完topk之后再进行softmax
             topk_probs = torch.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(topk_probs, num_samples=1)
+            idx_next = torch.multinomial(topk_probs, num_samples=1, generator=generator)
             # 合并旧的和新的idx
             idx = torch.cat((idx, idx_next), dim=1)
         return idx

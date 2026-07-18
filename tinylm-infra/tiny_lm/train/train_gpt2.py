@@ -7,6 +7,8 @@ import torch
 from torch.distributed import init_process_group, destroy_process_group
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import tiktoken
+from torch.nn import functional as F
 
 from tiny_lm.dataloader.dataloader import DataLoaderLite
 from tiny_lm.model.gpt2 import GPT, GPTConfig
@@ -60,10 +62,12 @@ def main():
     # 在除了to(device)的场景之外使用，因为如果是多卡训练，device是cuda:0这种类型后续难使用
     device_type = "cuda" if device.startswith("cuda") else "cpu"
 
+    enc = tiktoken.get_encoding("gpt2")
+
     # 梯度累计的部分
     # 总训练批次
     # DDP 下 global tokens = B * T * grad_accum_steps * ddp_world_size。
-    total_batch_size = 2**19 # 2**19, ~0.5M, in number of tokens
+    total_batch_size = 2**14 # 2**19, ~0.5M, in number of tokens
     B = 4 # micro batch size
     T = 512 # sequence length
     assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
@@ -76,10 +80,14 @@ def main():
         print(f"total desired batch size: {total_batch_size}")
         print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
-    # 数据加载器
-    dataload = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
+    # 训练数据
+    train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
                              num_processes= ddp_world_size, split="train", local_dir="tinystories")
 
+    # 验证数据集
+    val_loader  = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
+                             num_processes= ddp_world_size, split="val", local_dir="tinystories")
+    
     # 允许pytorch在执行float32的矩阵乘法的时候，采用tf32的精度来加速计算
     # torch.set_float32_matmul_precision("high")
 
@@ -103,7 +111,7 @@ def main():
 
     # 预热步骤
     warmup_steps = 10 # max_steps * 0.035          31
-    max_steps = 50 # 总tokens除以total_batch_size  904
+    max_steps = 51 # 总tokens除以total_batch_size  904
 
     # 带预热阶段的余弦衰减学习率调度
     def get_lr(step):
@@ -127,18 +135,78 @@ def main():
     
     # optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
     # optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas=(0.9, 0.95), eps=1e-8)
-    for i in range(max_steps):
+    for step in range(max_steps):
 
         t0 = time.time()
+
+        # 每50步进行一次验证
+        # 与训练过程类似，没有backward
+        if step % 50 == 0:
+            model.eval()
+            val_loader.reset()
+            with torch.no_grad():
+                val_loss_accum = 0.0
+                val_loss_steps = 20
+                for _ in range(val_loss_steps):
+                    x, y = val_loader.next_batch()
+                    x, y = x.to(device), y.to(device)
+                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                        logits, loss = model(x, y)
+                    loss = loss / val_loss_steps
+                    val_loss_accum += loss.detach()
+            if ddp:
+                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+            if master_process:
+                print(f"validation loss: {val_loss_accum.item():.4f}")
+                
+        # 验证的过程顺便进行一次采样
+        if (step > 0 and step % 50 == 0):
+            model.eval()
+            # 只需要主进程进行采样
+            if master_process:
+                # 一条prompt生成的结果次数
+                # 一条生成序列的最大的token数量
+                num_return_sequences = 4
+                max_length = 32
+            
+                # 1. 用 GPT-2 tokenizer 把 prompt 编码成 token id
+                # 2. 转成 torch tensor
+                # 3. unsqueeze(0)：从 [T] 变成 [1, T]
+                # 4. repeat(num_return_sequences, 1)：复制成多条序列
+                tokens = enc.encode("Hello, I'm a language model,")
+                tokens = torch.tensor(tokens, dtype=torch.long, device=device)
+                xgen = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
+           
+                # 随机数生成器：
+                sample_rng = torch.Generator(device=device)
+                sample_rng.manual_seed(42)
+
+                with torch.no_grad():
+                    # 调用原始 GPT 模型的自定义生成函数。
+                    y = raw_model.generate(
+                        xgen,
+                        max_new_tokens=max_length,
+                        temperature=1.0,
+                        top_k=50,
+                        generator=sample_rng,
+                    )
+
+                for i in range(num_return_sequences):
+                    decoded = enc.decode(y[i].tolist())
+                    print(f"sample {i}: {decoded}")
+
+        # 训练过程
+        # 采样结束后切回训练模式。
+        model.train()
         # 在开始新一轮反向传播之前，把上一轮参数中保存的梯度清空。
         optimizer.zero_grad()
 
         # 损失值的累加器，必须进行累加否则直接返回loss的值本质上是最后一次microstep的loss值
         loss_accum = 0.0
 
-        for step in range(grad_accum_steps):
+        for micro_step in range(grad_accum_steps):
             # 得到下一批次的x，y
-            x, y = dataload.next_batch()
+            x, y = train_loader.next_batch()
             x, y = x.to(device), y.to(device)
 
             # 使用混合精度，一些参数使用bf16， 一些仍然保留float32，加速矩阵计算
@@ -157,7 +225,7 @@ def main():
             # 梯度累积时，前面的 micro step 只在本地累积梯度；
             # 最后一个 micro step 才触发 DDP 梯度同步，减少通信开销。   
             if ddp:
-                model.require_backward_grad_sync = (step == grad_accum_steps - 1)
+                model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
             
             loss.backward()
     
@@ -170,7 +238,7 @@ def main():
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         
         # 根据当前步骤获取现在的学习率
-        lr = get_lr(i)
+        lr = get_lr(step)
 
         # 深入优化器直接修改对应的学习率的值
         for p in optimizer.param_groups:
@@ -184,10 +252,10 @@ def main():
             torch.cuda.synchronize()
         t1 = time.time()
         dt = (t1 - t0) * 1000
-        tokens_per_sec = (dataload.B * dataload.T * grad_accum_steps * ddp_world_size) / (t1 - t0) 
+        tokens_per_sec = (train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size) / (t1 - t0) 
         
         if master_process:
-            print(f"step {i:5d} , lr = {lr:.4e}, loss is {loss_accum.item():.5f}, norm = {norm:.4f},  dt = {dt:.2f} ms, token/sec = {tokens_per_sec:.2f}")
+            print(f"step {step:5d} , lr = {lr:.4e}, loss is {loss_accum.item():.5f}, norm = {norm:.4f},  dt = {dt:.2f} ms, token/sec = {tokens_per_sec:.2f}")
 
     if ddp:
         destroy_process_group()
