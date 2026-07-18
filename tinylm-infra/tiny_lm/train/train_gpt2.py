@@ -8,7 +8,7 @@ from torch.distributed import init_process_group, destroy_process_group
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from tiny_lm.data.dataloader import DataLoaderLite
+from tiny_lm.dataloader.dataloader import DataLoaderLite
 from tiny_lm.model.gpt2 import GPT, GPTConfig
 
 # simple launch
@@ -63,7 +63,7 @@ def main():
     # 梯度累计的部分
     # 总训练批次
     # DDP 下 global tokens = B * T * grad_accum_steps * ddp_world_size。
-    total_batch_size = 2**15 # 2**19, ~0.5M, in number of tokens
+    total_batch_size = 2**19 # 2**19, ~0.5M, in number of tokens
     B = 4 # micro batch size
     T = 512 # sequence length
     assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
@@ -78,7 +78,7 @@ def main():
 
     # 数据加载器
     dataload = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
-                             num_processes= ddp_world_size ,  file_name="data/input.txt")
+                             num_processes= ddp_world_size, split="train", local_dir="tinystories")
 
     # 允许pytorch在执行float32的矩阵乘法的时候，采用tf32的精度来加速计算
     # torch.set_float32_matmul_precision("high")
@@ -102,8 +102,8 @@ def main():
     min_lr = max_lr * 0.1
 
     # 预热步骤
-    warmup_steps = 10
-    max_steps = 50
+    warmup_steps = 10 # max_steps * 0.035          31
+    max_steps = 50 # 总tokens除以total_batch_size  904
 
     # 带预热阶段的余弦衰减学习率调度
     def get_lr(step):
@@ -187,7 +187,7 @@ def main():
         tokens_per_sec = (dataload.B * dataload.T * grad_accum_steps * ddp_world_size) / (t1 - t0) 
         
         if master_process:
-            print(f"step {i} , lr = {lr:.4e}, loss is {loss_accum.item():.5f}, norm = {norm:.4f},  dt = {dt:.2f} ms, token/sec = {tokens_per_sec:.2f}")
+            print(f"step {i:5d} , lr = {lr:.4e}, loss is {loss_accum.item():.5f}, norm = {norm:.4f},  dt = {dt:.2f} ms, token/sec = {tokens_per_sec:.2f}")
 
     if ddp:
         destroy_process_group()

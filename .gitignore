@@ -41,6 +41,7 @@ wandb/
 # =========================
 datasets/*
 !datasets/.gitkeep
+tinylm-infra/data/*
 
 # =========================
 # Model artifacts
