@@ -35,6 +35,7 @@ env/
 logs/
 runs/
 wandb/
+tinylm-infra/log/*
 
 # =========================
 # Datasets

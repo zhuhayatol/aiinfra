@@ -18,19 +18,7 @@ TinyLM-Infra 是一个面向 AI Infra 面试准备的端到端小型语言模型
 ## 目录结构
 
 - `tiny_lm/`：核心模型代码，包括 tokenizer、dataset、model、optimizer 和 generation。
-- `algorithms/`：学习过程代码，包括 micrograd、makemore、CS336 和 Hot100。
-- `training/`：训练脚本，包括单卡训练、AMP、DDP 和 profiling。
-- `inference/`：推理脚本，包括 ONNX 导出、ONNX Runtime 推理和 benchmark。
-- `kernels/`：CUDA / Triton 裸算子实验。
-- `torch_extension/`：PyTorch C++/CUDA 自定义算子扩展。
+
 - `tests/`：自动化测试。
-- `docs/`：项目文档和面试准备笔记。
 
-## 当前阶段
 
-当前阶段重点：
-
-1. 实现 CharTokenizer 和 BPE Tokenizer。
-2. 实现文本 Dataset 和 batch 构造。
-3. 跑通 Bigram Language Model。
-4. 逐步扩展到 TinyGPT。

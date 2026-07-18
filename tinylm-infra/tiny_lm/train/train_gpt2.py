@@ -8,10 +8,10 @@ from torch.distributed import init_process_group, destroy_process_group
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import tiktoken
-from torch.nn import functional as F
 
 from tiny_lm.dataloader.dataloader import DataLoaderLite
 from tiny_lm.model.gpt2 import GPT, GPTConfig
+from tiny_lm.eval.hellaswag import evaluate_hellaswag
 
 # simple launch
 # python3 train_gpt2.py
@@ -97,7 +97,10 @@ def main():
     model.to(device)
 
     # 使用compile预先编译模型，加速训练
-    # model = torch.compile(model)
+    use_compile = False
+    if use_compile:
+        model = torch.compile(model)
+
 
     if ddp:
         # DDP可以在反向传播的过程中，将所有计算节点上的梯度进行平均处理并且同步
@@ -135,13 +138,22 @@ def main():
     
     # optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
     # optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas=(0.9, 0.95), eps=1e-8)
+    
+    # 创建log文件，将checkpoint和log写进去
+    log_dir = 'log'
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"log.txt")
+    with open(log_file, "w") as f:
+        pass
+
     for step in range(max_steps):
 
         t0 = time.time()
+        last_step = (step == max_steps - 1)
 
-        # 每50步进行一次验证
+        # 每50步进行一次验证 或者 最后一次
         # 与训练过程类似，没有backward
-        if step % 50 == 0:
+        if step % 50 == 0 or last_step:
             model.eval()
             val_loader.reset()
             with torch.no_grad():
@@ -159,8 +171,26 @@ def main():
             if master_process:
                 print(f"validation loss: {val_loss_accum.item():.4f}")
                 
+                # 写入文件
+                with open(log_file, "a") as f:
+                    f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+
+                if step > 0 and (step % 500 == 0 or last_step):
+                    # 模型checkpoint
+                    # 这里保存了模型的权重，方便下一次加载
+                    checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                    checkpoint = {
+                        'model': raw_model.state_dict(),
+                        'config': raw_model.config,
+                        'step': step,
+                        'val_loss': val_loss_accum.item()
+                    }
+                    # you might also want to add optimizer.state_dict() and
+                    # rng seeds etc., if you wanted to more exactly resume training
+                    torch.save(checkpoint, checkpoint_path)
+
         # 验证的过程顺便进行一次采样
-        if (step > 0 and step % 50 == 0):
+        if ((step > 0 and step % 50 == 0) or last_step) and (not use_compile):
             model.eval()
             # 只需要主进程进行采样
             if master_process:
@@ -194,6 +224,31 @@ def main():
                 for i in range(num_return_sequences):
                     decoded = enc.decode(y[i].tolist())
                     print(f"sample {i}: {decoded}")
+
+        # 顺便也需要进行hellaswag评估
+        if (step % 50 == 0 or last_step) and (not use_compile):
+            model.eval()
+
+            if master_process:
+                hs = evaluate_hellaswag(
+                    raw_model,
+                    device,
+                    device_type,
+                    amp_dtype=torch.bfloat16,
+                    max_examples=200,
+                )
+
+                print(
+                    f"answer: {hs['answer']}\n"
+                    f"label: {hs['label_list']}\n"
+                    f"hellaswag acc: "
+                    f"{hs['num_correct']}/{hs['num_total']} "
+                    f"= {hs['acc']:.4f}, "
+                    f"skipped={hs['num_skipped']}"
+                )
+
+                with open(log_file, "a") as f:
+                    f.write(f"{step} hella {hs['acc']:.4f}\n")
 
         # 训练过程
         # 采样结束后切回训练模式。
@@ -257,6 +312,8 @@ def main():
         if master_process:
             print(f"step {step:5d} , lr = {lr:.4e}, loss is {loss_accum.item():.5f}, norm = {norm:.4f},  dt = {dt:.2f} ms, token/sec = {tokens_per_sec:.2f}")
 
+            with open(log_file, "a") as f:
+                f.write(f"{step} train {loss_accum.item():.6f}\n")
     if ddp:
         destroy_process_group()
 if __name__ == "__main__":
