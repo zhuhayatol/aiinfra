@@ -1,3 +1,4 @@
-[tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
+[project]
+name = "tinylm-infra"
+version = "2026.7.20"
+dynamic = ["version"]
