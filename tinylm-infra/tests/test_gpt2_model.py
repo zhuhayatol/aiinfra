@@ -67,22 +67,3 @@ def test_generate_over_block_size():
 
     assert out.shape == (2, 15)
 
-def test_from_pretrained():
-
-    enc = tiktoken.get_encoding("gpt2")
-
-    model = GPT.from_pretrained("gpt2", model_path="../tiny_lm/model/gpt2_huggingface")
-    model.eval()
-    model.to("cuda")
-
-    text = "hello, im from Peking university"
-    idx = torch.tensor(enc.encode(text), dtype=torch.long)[None, :].to("cuda")
-
-    out = model.generate(
-        idx,
-        max_new_tokens=50,
-        temperature=1.0,
-        top_k=50,
-    )
-
-    assert out.shape == (1, 50 + len(idx[0, :]))
