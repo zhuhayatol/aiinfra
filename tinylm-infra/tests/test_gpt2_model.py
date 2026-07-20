@@ -1,6 +1,7 @@
 from tiny_lm.model.gpt2 import GPT, GPTConfig
 import torch
 import tiktoken
+import pytest
 
 def test_gpt_forward_shape():
     config = GPTConfig(
@@ -67,3 +68,40 @@ def test_generate_over_block_size():
 
     assert out.shape == (2, 15)
 
+
+def test_gpt_rejects_sequence_over_block_size():
+    config = GPTConfig(
+        block_size=8,
+        vocab_size=100,
+        n_layer=2,
+        n_head=2,
+        n_embd=32,
+    )
+    model = GPT(config)
+
+    idx = torch.randint(0, config.vocab_size, (2, 9))
+
+    with pytest.raises(AssertionError):
+        model(idx)
+
+
+def test_gpt_forward_is_deterministic_in_eval_mode():
+    torch.manual_seed(42)
+
+    config = GPTConfig(
+        block_size=16,
+        vocab_size=100,
+        n_layer=2,
+        n_head=2,
+        n_embd=32,
+    )
+    model = GPT(config)
+    model.eval()
+
+    idx = torch.randint(0, config.vocab_size, (2, 8))
+
+    with torch.no_grad():
+        logits_1, _ = model(idx)
+        logits_2, _ = model(idx)
+
+    torch.testing.assert_close(logits_1, logits_2)

@@ -8,29 +8,56 @@ from tiny_lm.model.gpt2 import GPT
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    os.environ.get("RUN_INTEGRATION_TESTS") != "1",
-    reason="设置 RUN_INTEGRATION_TESTS=1 后运行外部模型集成测试",
-)
 def test_from_pretrained():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    local_model_path = os.environ.get("GPT2_LOCAL_PATH")
 
-    model = GPT.from_pretrained("gpt2")
+    if local_model_path:
+        model = GPT.from_pretrained(
+            model_type="gpt2",
+            model_path=local_model_path,
+        )
+        model_source = f"local: {local_model_path}"
+    else:
+        model = GPT.from_pretrained(
+            model_type="gpt2",
+            model_path=None,
+        )
+        model_source = "Hugging Face cache or Hub: gpt2"
+
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
+
     model.eval()
     model.to(device)
 
-    enc = tiktoken.get_encoding("gpt2")
-    idx = torch.tensor(
-        enc.encode("Hello, I am"),
+    tokenizer = tiktoken.get_encoding("gpt2")
+
+    text = "Hello, I am from Peking University."
+    input_ids = torch.tensor(
+        tokenizer.encode(text),
         dtype=torch.long,
         device=device,
-    )[None, :]
+    ).unsqueeze(0)
 
-    output = model.generate(
-        idx,
+    if device.type == "cuda":
+        generator = torch.Generator(device=device)
+    else:
+        generator = torch.Generator()
+
+    generator.manual_seed(42)
+
+    output_ids = model.generate(
+        input_ids,
         max_new_tokens=2,
         temperature=1.0,
-        top_k=20,
+        top_k=50,
+        generator=generator,
     )
 
-    assert output.shape == (1, idx.size(1) + 2)
+    print(f"Loaded model from {model_source}")
+
+    assert output_ids.shape == (
+        1,
+        input_ids.size(1) + 2,
+    )
