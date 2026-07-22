@@ -68,7 +68,7 @@ def test_generate_over_block_size():
 
     assert out.shape == (2, 15)
 
-
+# 测试给模型的输入大于blocksize的时候是否会报错
 def test_gpt_rejects_sequence_over_block_size():
     config = GPTConfig(
         block_size=8,
@@ -84,7 +84,7 @@ def test_gpt_rejects_sequence_over_block_size():
     with pytest.raises(AssertionError):
         model(idx)
 
-
+# 测试 GPT 模型在 eval() 模式下是否具有确定性（即相同输入是否产生相同输出）
 def test_gpt_forward_is_deterministic_in_eval_mode():
     torch.manual_seed(42)
 

@@ -33,3 +33,10 @@ pytest -s tests/integration
 ```
 
 **注意**：如果事先export了GPT2_LOCAL_PATH,一定要先`unset GPT2_LOCAL_PATH`再进行测试。
+
+### test_gpt2_model.py
+
+``` bash 
+cd tinylm-infra/
+pytest -s tests/test_gpt2_model.py
+```
