@@ -1,0 +1,48 @@
+# configs/train_gpt2.yaml
+
+experiment:
+  name: gpt2_tinystories
+  seed: 42
+  output_dir: outputs/gpt2_tinystories
+
+model:
+  block_size: 512
+  vocab_size: 50304
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+
+data:
+  data_dir: tinystories
+  batch_size: 4
+  sequence_length: 512
+
+training:
+  max_steps: 60
+  total_batch_size: 16384
+
+  max_learning_rate: 0.0006
+  min_learning_rate: 0.00006
+  warmup_steps: 10
+
+  weight_decay: 0.1
+  gradient_clip: 1.0
+
+  dtype: bfloat16
+  use_compile: false
+  use_fused_adamw: true
+
+evaluation:
+  eval_interval: 50
+  eval_steps: 20
+  run_hellaswag: true
+
+checkpoint:
+  save_interval: 50
+  save_optimizer: true
+  save_rng_state: true
+  save_dataloader_state: true
+  resume_from: log/model_00050.pt
+
+distributed:
+  backend: nccl

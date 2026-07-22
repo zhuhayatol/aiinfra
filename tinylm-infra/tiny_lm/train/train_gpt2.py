@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 import math
 import os
+import argparse
 
 import torch
 from torch.distributed import init_process_group, destroy_process_group
@@ -12,6 +13,8 @@ import tiktoken
 from tiny_lm.dataloader.dataloader import DataLoaderLite
 from tiny_lm.model.gpt2 import GPT, GPTConfig
 from tiny_lm.eval.hellaswag import evaluate_hellaswag
+from tiny_lm.train.checkpoint import load_checkpoint, save_checkpoint
+from tiny_lm.config import load_config, validate_config
 
 # simple launch
 # python3 train_gpt2.py
@@ -19,7 +22,36 @@ from tiny_lm.eval.hellaswag import evaluate_hellaswag
 # DDP launch for e.g 4 GPUs:
 # torchrun --standalone --nproc_per_node=4 train_gpt2.py
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="训练 TinyLM GPT 模型"
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/train_gpt2.yaml",
+    )
+
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+    )
+
+    return parser.parse_args()
+
+
 def main():
+
+    # 读取命令行参数
+    args = parse_args()
+
+    # 从YAML文件中加载完整训练配置
+    config = load_config(args.config)
+
+    print(f"使用配置文件：{args.config}")
+    print(f"实验名称：{config.experiment.name}")
 
     # 判断是否能进行ddp
     # 初始化分布式进程组。NCCL 是 NVIDIA GPU 上 DDP 的常用后端。
@@ -62,14 +94,17 @@ def main():
     # 在除了to(device)的场景之外使用，因为如果是多卡训练，device是cuda:0这种类型后续难使用
     device_type = "cuda" if device.startswith("cuda") else "cpu"
 
+    # 验证yaml文件
+    validate_config(config, ddp_world_size)
+
     enc = tiktoken.get_encoding("gpt2")
 
     # 梯度累计的部分
     # 总训练批次
     # DDP 下 global tokens = B * T * grad_accum_steps * ddp_world_size。
-    total_batch_size = 2**14 # 2**19, ~0.5M, in number of tokens
-    B = 4 # micro batch size
-    T = 512 # sequence length
+    total_batch_size = config.training.total_batch_size # 2**19, ~0.5M, in number of tokens
+    B = config.data.batch_size # micro batch size
+    T = config.data.sequence_length # sequence length
     assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
     
     # 每个进程本地需要累积的 micro step 数。
@@ -82,39 +117,29 @@ def main():
 
     # 训练数据
     train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
-                             num_processes= ddp_world_size, split="train", local_dir="tinystories")
+                             num_processes= ddp_world_size, split="train", local_dir=config.data.data_dir)
 
     # 验证数据集
     val_loader  = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
-                             num_processes= ddp_world_size, split="val", local_dir="tinystories")
+                             num_processes= ddp_world_size, split="val", local_dir=config.data.data_dir)
     
     # 允许pytorch在执行float32的矩阵乘法的时候，采用tf32的精度来加速计算
     # torch.set_float32_matmul_precision("high")
 
     # model = GPT.from_pretrained("gpt2", model_path="./gpt2_huggingface")
-    model = GPT(GPTConfig(vocab_size=50304))
+    model = GPT(GPTConfig(vocab_size=config.model.vocab_size))
     # model.eval()
     model.to(device)
 
-    # 使用compile预先编译模型，加速训练
-    use_compile = False
-    if use_compile:
-        model = torch.compile(model)
-
-
-    if ddp:
-        # DDP可以在反向传播的过程中，将所有计算节点上的梯度进行平均处理并且同步
-        model = DDP(model, device_ids = [ddp_local_rank])
-
-    raw_model = model.module if ddp else model
+    raw_model = model
 
     # 调整学习率
-    max_lr = 6e-4
-    min_lr = max_lr * 0.1
+    max_lr = config.training.max_learning_rate
+    min_lr = config.training.min_learning_rate
 
     # 预热步骤
-    warmup_steps = 10 # max_steps * 0.035          31
-    max_steps = 51 # 总tokens除以total_batch_size  904
+    warmup_steps = config.training.warmup_steps # max_steps * 0.035          31
+    max_steps = config.training.max_steps # 总tokens除以total_batch_size  904
 
     # 带预热阶段的余弦衰减学习率调度
     def get_lr(step):
@@ -134,31 +159,94 @@ def main():
         return min_lr + coeff * (max_lr - min_lr)
 
     # 创建优化器
-    optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
+    optimizer = raw_model.configure_optimizers(weight_decay=config.training.weight_decay, learning_rate= config.training.max_learning_rate, device_type=device_type) 
     
     # optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
     # optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas=(0.9, 0.95), eps=1e-8)
     
+    # 按需恢复训练
+
+    # 命令行参数优先于 YAML 配置。
+    resume_path = (
+        args.resume
+        if args.resume is not None
+        else config.checkpoint.resume_from
+    )
+    # 没有指定 Checkpoint 时，从第 0 步开始训练。
+    start_step = 0
+
+    if resume_path is not None:
+        checkpoint = load_checkpoint(
+            path=resume_path,
+
+            # 此时 model 尚未经过 compile 和 DDP 包装。
+            model=raw_model,
+            # 恢复 AdamW 的动量等优化器状态。
+            optimizer=optimizer,
+            # 恢复数据集当前读取位置。
+            train_loader=train_loader,
+        )
+
+        if "step" not in checkpoint:
+            raise KeyError(
+                "Checkpoint 中缺少 step"
+            )
+
+        # Checkpoint 保存的是已经完成的训练步骤，
+        # 因此恢复后从下一步继续。
+        start_step = checkpoint["step"] + 1
+
+        if master_process:
+            print(
+                f"已从 Checkpoint 恢复：{resume_path}"
+            )
+            print(
+                f"已完成 step:{checkpoint['step']}"
+            )
+            print(
+                f"将从 step {start_step} 继续训练"
+            )
+
+    else:
+        if master_process:
+            print("未指定 Checkpoint:将从头训练")
+
+    # 使用compile预先编译模型，加速训练
+    use_compile = config.training.use_compile
+    if use_compile:
+        model = torch.compile(model)
+
+    if ddp:
+        # DDP可以在反向传播的过程中，将所有计算节点上的梯度进行平均处理并且同步
+        model = DDP(model, device_ids = [ddp_local_rank])
+
+    raw_model = model.module if ddp else model
+
     # 创建log文件，将checkpoint和log写进去
     log_dir = 'log'
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"log.txt")
-    with open(log_file, "w") as f:
-        pass
+    log_file = os.path.join(log_dir, f"log_{config.experiment.name}.txt")
 
-    for step in range(max_steps):
+    if resume_path is not None:
+        with open(log_file, "a") as f:
+            pass
+    else:
+        with open(log_file, "w") as f:
+            pass
+
+    for step in range(start_step, max_steps):
 
         t0 = time.time()
         last_step = (step == max_steps - 1)
 
         # 每50步进行一次验证 或者 最后一次
         # 与训练过程类似，没有backward
-        if step % 50 == 0 or last_step:
+        if step % config.evaluation.eval_interval == 0 or last_step:
             model.eval()
             val_loader.reset()
             with torch.no_grad():
                 val_loss_accum = 0.0
-                val_loss_steps = 20
+                val_loss_steps = config.evaluation.eval_steps
                 for _ in range(val_loss_steps):
                     x, y = val_loader.next_batch()
                     x, y = x.to(device), y.to(device)
@@ -175,22 +263,22 @@ def main():
                 with open(log_file, "a") as f:
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")
 
-                if step > 0 and (step % 500 == 0 or last_step):
+                if step > 0 and (step % config.evaluation.eval_interval == 0 or last_step):
                     # 模型checkpoint
                     # 这里保存了模型的权重，方便下一次加载
                     checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
-                    checkpoint = {
-                        'model': raw_model.state_dict(),
-                        'config': raw_model.config,
-                        'step': step,
-                        'val_loss': val_loss_accum.item()
-                    }
-                    # you might also want to add optimizer.state_dict() and
-                    # rng seeds etc., if you wanted to more exactly resume training
-                    torch.save(checkpoint, checkpoint_path)
+
+                    save_checkpoint(checkpoint_path, 
+                                    raw_model,
+                                    optimizer,
+                                    step,
+                                    train_loader,
+                                    config=raw_model.config,
+                                    val_loss=val_loss_accum.item())
+
 
         # 验证的过程顺便进行一次采样
-        if ((step > 0 and step % 50 == 0) or last_step) and (not use_compile):
+        if ((step > 0 and step % config.evaluation.eval_interval == 0) or last_step) and (not use_compile):
             model.eval()
 
             if ddp:
@@ -213,7 +301,7 @@ def main():
            
                 # 随机数生成器：
                 sample_rng = torch.Generator(device=device)
-                sample_rng.manual_seed(42)
+                sample_rng.manual_seed(config.experiment.seed)
 
                 with torch.no_grad():
                     # 调用原始 GPT 模型的自定义生成函数。
@@ -233,7 +321,7 @@ def main():
                 dist.barrier()
 
         # 顺便也需要进行hellaswag评估
-        if (step % 50 == 0 or last_step) and (not use_compile):
+        if (step % config.evaluation.eval_interval == 0 or last_step) and (not use_compile):
             model.eval()
 
             # 确保所有进程都完成前面的验证和生成阶段，

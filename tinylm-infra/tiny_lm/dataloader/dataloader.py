@@ -107,6 +107,7 @@ class DataLoaderLite:
 
         return state
     
+    # 恢复checkpoint
     def load_state_dict(self, state):
         if "current_position" not in state:
             raise ValueError("Missing current_position in dataloader state")
