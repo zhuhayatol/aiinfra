@@ -37,8 +37,6 @@ training:
   weight_decay: 0.1
   gradient_clip: 1.0
   dtype: float32
-  use_compile: false
-  use_fused_adamw: false
 
 evaluation:
   eval_interval: 5

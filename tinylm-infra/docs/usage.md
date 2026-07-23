@@ -20,6 +20,20 @@ pip install -e ".[dev]"
 ```
 
 ## 准备数据
+### 在autodl上出现网络问题的时候，适用的解决方案
+``` bash
+source /etc/network_turbo
+
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HOME=/root/autodl-tmp/huggingface
+export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
+export HF_DATASETS_CACHE=/root/autodl-tmp/huggingface/datasets
+
+export HF_HUB_DISABLE_XET=1
+export HF_HUB_DOWNLOAD_TIMEOUT=120
+export HF_HUB_ETAG_TIMEOUT=60
+```
+
 
 ### TinyStories
 
