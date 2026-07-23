@@ -10,7 +10,7 @@ from tiny_lm.model.gpt2 import GPT, GPTConfig
 
 
 # 默认从 log 文件夹里找最新的 checkpoint
-LOG_DIR = Path("log")
+LOG_DIR = Path("outputs/gpt2_tinystories/checkpoints")
 
 
 def find_latest_checkpoint(log_dir=LOG_DIR):
@@ -33,13 +33,15 @@ def load_checkpoint_model(ckpt_path, device):
     """
     从 checkpoint 加载模型。
     """
+    # 先在 CPU 上加载整个 Checkpoint，避免 optimizer 和 RNG 状态
+    # 被一并映射到 GPU，造成额外显存占用。
     checkpoint = torch.load(
         ckpt_path,
-        map_location=device,
+        map_location="cpu",
         weights_only=False,
     )
 
-    config = checkpoint["config"]
+    config = checkpoint["model_config"]
 
     # 兼容 config 保存成 dict 的情况
     if isinstance(config, dict):

@@ -85,9 +85,6 @@ class TrainingConfig:
     # 是否使用 torch.compile 编译模型。
     use_compile: bool = False
 
-    # 是否在硬件支持时使用 fused AdamW。
-    use_fused_adamw: bool = True
-
 
 @dataclass
 class EvaluationConfig:

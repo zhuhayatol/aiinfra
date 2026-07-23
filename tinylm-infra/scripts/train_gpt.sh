@@ -28,10 +28,10 @@ echo "================================"
 
 if [ "$NUM_GPUS" -gt 1 ]; then
     echo "Launching DDP with $NUM_GPUS GPUs..."
-    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m tiny_lm.train.train_gpt2
+    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m tiny_lm.train.train_gpt2 "$@"
 else
     echo "Launching single-process training..."
-    python -m tiny_lm.train.train_gpt2
+    python -m tiny_lm.train.train_gpt2 "$@"
 fi
 
 echo "Training finished."

@@ -18,7 +18,7 @@ data:
   sequence_length: 512
 
 training:
-  max_steps: 60
+  max_steps: 50
   total_batch_size: 16384
 
   max_learning_rate: 0.0006
@@ -30,7 +30,6 @@ training:
 
   dtype: bfloat16
   use_compile: false
-  use_fused_adamw: true
 
 evaluation:
   eval_interval: 50
@@ -42,7 +41,4 @@ checkpoint:
   save_optimizer: true
   save_rng_state: true
   save_dataloader_state: true
-  resume_from: log/model_00050.pt
-
-distributed:
-  backend: nccl
+  resume_from: null

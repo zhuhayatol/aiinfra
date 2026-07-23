@@ -15,7 +15,10 @@ dependencies = [
     "tiktoken>=0.5",
     "regex>=2023.10",
     "matplotlib>=3.7",
-    "pyyaml>=6.0"
+    "pyyaml>=6.0",
+    "transformers>=4.40",
+    "datasets>=2.18",
+    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]

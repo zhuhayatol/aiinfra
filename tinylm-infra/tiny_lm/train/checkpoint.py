@@ -171,6 +171,8 @@ def save_checkpoint(
 
     checkpoint: dict[str, Any] = {
         "model": raw_model.state_dict(),
+        "model_config": serialize_config(raw_model.config),
+        "train_config": serialize_config(config),
         "step": step,
     }
 

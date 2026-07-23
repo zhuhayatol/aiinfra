@@ -22,6 +22,12 @@ from tiny_lm.config import load_config, validate_config
 # DDP launch for e.g 4 GPUs:
 # torchrun --standalone --nproc_per_node=4 train_gpt2.py
 
+DTYPE_MAP = {
+    "float32": torch.float32,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+}
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="训练 TinyLM GPT 模型"
@@ -57,6 +63,36 @@ def main():
     # 初始化分布式进程组。NCCL 是 NVIDIA GPU 上 DDP 的常用后端。
     ddp = int(os.environ.get('RANK', -1)) != -1
     print(f"can we ddp?  {ddp}")
+
+    # 设置模型初始化和训练过程使用的全局随机种子。
+    torch.manual_seed(
+        config.experiment.seed
+    )
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(
+            config.experiment.seed
+    )
+
+    # 当前实验的所有产物统一保存在 output_dir 中。
+    output_dir = Path(
+        config.experiment.output_dir
+    )
+
+    checkpoint_dir = (
+        output_dir / "checkpoints"
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    checkpoint_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
 
     if ddp:
         # ddp初始化
@@ -127,7 +163,12 @@ def main():
     # torch.set_float32_matmul_precision("high")
 
     # model = GPT.from_pretrained("gpt2", model_path="./gpt2_huggingface")
-    model = GPT(GPTConfig(vocab_size=config.model.vocab_size))
+    model = GPT(GPTConfig(
+        block_size=config.model.block_size,
+        vocab_size=config.model.vocab_size,
+        n_layer=config.model.n_layer,
+        n_head=config.model.n_head,
+        n_embd=config.model.n_embd,))
     # model.eval()
     model.to(device)
 
@@ -159,7 +200,10 @@ def main():
         return min_lr + coeff * (max_lr - min_lr)
 
     # 创建优化器
-    optimizer = raw_model.configure_optimizers(weight_decay=config.training.weight_decay, learning_rate= config.training.max_learning_rate, device_type=device_type) 
+    optimizer = raw_model.configure_optimizers(weight_decay=config.training.weight_decay, 
+                                               learning_rate= config.training.max_learning_rate, 
+                                               device_type=device_type
+                                            ) 
     
     # optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=3e-4, device_type=device_type) 
     # optimizer = torch.optim.AdamW(model.parameters(), lr = 3e-4, betas=(0.9, 0.95), eps=1e-8)
@@ -178,13 +222,21 @@ def main():
     if resume_path is not None:
         checkpoint = load_checkpoint(
             path=resume_path,
-
             # 此时 model 尚未经过 compile 和 DDP 包装。
             model=raw_model,
             # 恢复 AdamW 的动量等优化器状态。
             optimizer=optimizer,
-            # 恢复数据集当前读取位置。
-            train_loader=train_loader,
+            # 单卡完整恢复 DataLoader；
+            # DDP 暂时不恢复 rank 0 的 DataLoader 状态。
+            train_loader=(
+                None
+                if ddp
+                else train_loader
+            ),
+
+            # 单卡恢复 RNG；
+            # DDP 精确恢复需要保存每个 rank 的独立 RNG。
+            restore_rng_state=not ddp,
         )
 
         if "step" not in checkpoint:
@@ -223,9 +275,7 @@ def main():
     raw_model = model.module if ddp else model
 
     # 创建log文件，将checkpoint和log写进去
-    log_dir = 'log'
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"log_{config.experiment.name}.txt")
+    log_file = os.path.join(output_dir, f"{config.experiment.name}.log")
 
     if resume_path is not None:
         with open(log_file, "a") as f:
@@ -234,48 +284,11 @@ def main():
         with open(log_file, "w") as f:
             pass
 
+    # 开始训练
     for step in range(start_step, max_steps):
 
         t0 = time.time()
         last_step = (step == max_steps - 1)
-
-        # 每50步进行一次验证 或者 最后一次
-        # 与训练过程类似，没有backward
-        if step % config.evaluation.eval_interval == 0 or last_step:
-            model.eval()
-            val_loader.reset()
-            with torch.no_grad():
-                val_loss_accum = 0.0
-                val_loss_steps = config.evaluation.eval_steps
-                for _ in range(val_loss_steps):
-                    x, y = val_loader.next_batch()
-                    x, y = x.to(device), y.to(device)
-                    with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-                        logits, loss = model(x, y)
-                    loss = loss / val_loss_steps
-                    val_loss_accum += loss.detach()
-            if ddp:
-                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
-            if master_process:
-                print(f"validation loss: {val_loss_accum.item():.4f}")
-                
-                # 写入文件
-                with open(log_file, "a") as f:
-                    f.write(f"{step} val {val_loss_accum.item():.4f}\n")
-
-                if step > 0 and (step % config.evaluation.eval_interval == 0 or last_step):
-                    # 模型checkpoint
-                    # 这里保存了模型的权重，方便下一次加载
-                    checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
-
-                    save_checkpoint(checkpoint_path, 
-                                    raw_model,
-                                    optimizer,
-                                    step,
-                                    train_loader,
-                                    config=raw_model.config,
-                                    val_loss=val_loss_accum.item())
-
 
         # 验证的过程顺便进行一次采样
         if ((step > 0 and step % config.evaluation.eval_interval == 0) or last_step) and (not use_compile):
@@ -321,7 +334,7 @@ def main():
                 dist.barrier()
 
         # 顺便也需要进行hellaswag评估
-        if (step % config.evaluation.eval_interval == 0 or last_step) and (not use_compile):
+        if (step % config.evaluation.eval_interval == 0 or last_step) and (not use_compile) and config.evaluation.run_hellaswag:
             model.eval()
 
             # 确保所有进程都完成前面的验证和生成阶段，
@@ -334,7 +347,7 @@ def main():
                     raw_model,
                     device,
                     device_type,
-                    amp_dtype=torch.bfloat16,
+                    amp_dtype=DTYPE_MAP[config.training.dtype],
                     max_examples=200,
                 )
 
@@ -368,8 +381,12 @@ def main():
             x, y = train_loader.next_batch()
             x, y = x.to(device), y.to(device)
 
+            use_autocast = (
+                device_type == "cuda"
+                and DTYPE_MAP[config.training.dtype] != torch.float32
+            )
             # 使用混合精度，一些参数使用bf16， 一些仍然保留float32，加速矩阵计算
-            with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+            with torch.autocast(device_type=device_type, dtype=DTYPE_MAP[config.training.dtype], enabled=use_autocast):
                 logits, loss = model(x, y)
 
             # 在梯度累积中，每个小批次需要放缩 grad_accum_steps 倍，这样才能补偿loss
@@ -394,7 +411,7 @@ def main():
 
         # 为了防止梯度突然变得很大，导致一次 optimizer.step() 把参数更新得太离谱。
         # 限制所有梯度的范式：计算所有梯度整体的 L2 Norm。
-        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.gradient_clip)
         
         # 根据当前步骤获取现在的学习率
         lr = get_lr(step)
@@ -404,6 +421,49 @@ def main():
             p["lr"] = lr
         
         optimizer.step()
+
+        # 每50步进行一次验证 或者 最后一次
+        # 先训练再评估，并且进行checkpoint的保存
+        # 与训练过程类似，没有backward
+        if step % config.evaluation.eval_interval == 0 or last_step:
+            model.eval()
+            val_loader.reset()
+            with torch.no_grad():
+                val_loss_accum = 0.0
+                val_loss_steps = config.evaluation.eval_steps
+                for _ in range(val_loss_steps):
+                    x, y = val_loader.next_batch()
+                    x, y = x.to(device), y.to(device)
+                    use_autocast = (
+                        device_type == "cuda"
+                        and DTYPE_MAP[config.training.dtype] != torch.float32
+                    )
+                    with torch.autocast(device_type=device_type, dtype=DTYPE_MAP[config.training.dtype], enabled=use_autocast):
+                        logits, loss = model(x, y)
+                    loss = loss / val_loss_steps
+                    val_loss_accum += loss.detach()
+            if ddp:
+                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+            if master_process:
+                print(f"validation loss: {val_loss_accum.item():.4f}")
+                
+                # 写入文件
+                with open(log_file, "a") as f:
+                    f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+
+                if step > 0 and (step % config.checkpoint.save_interval == 0 or last_step):
+                    # 模型checkpoint
+                    # 这里保存了模型的权重，方便下一次加载
+                    checkpoint_path = os.path.join(checkpoint_dir, f"model_{step:05d}.pt")
+
+                    save_checkpoint(checkpoint_path, 
+                                    raw_model,
+                                    optimizer,
+                                    step,
+                                    train_loader,
+                                    config=config,
+                                    val_loss=val_loss_accum.item())
+
 
         # 等待 GPU 把之前所有提交的 CUDA 任务全部执行完成，再继续执行后面的 CPU 代码。
         # 用于准确计时

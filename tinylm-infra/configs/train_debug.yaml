@@ -25,7 +25,6 @@ training:
   gradient_clip: 1.0
   dtype: bfloat16
   use_compile: false
-  use_fused_adamw: true
 
 evaluation:
   eval_interval: 1
