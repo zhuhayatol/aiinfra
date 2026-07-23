@@ -1,3 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "tinylm-infra"
+version = "0.1.0"
+description = "用于学习大模型训练与推理基础设施的轻量项目"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1",
+    "numpy>=1.24",
+    "tiktoken>=0.5",
+    "regex>=2023.10",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+    "transformers>=4.40",
+    "datasets>=2.18",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tiny_lm*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: 需要外部模型、网络或较大计算资源的集成测试",
+]

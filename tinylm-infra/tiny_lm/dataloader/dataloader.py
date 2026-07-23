@@ -95,3 +95,35 @@ class DataLoaderLite:
                 tokens = load_tokens(s)
                 count_tokens += len(tokens)
             print(f"the {self.local_dir} has {count_tokens} tokens")
+
+    def state_dict(self):
+        # 记录当前数据集状态
+        state = {
+            "current_position": self.current_position,
+        }
+
+        if self.file_name is None:
+            state["current_shard"] = self.current_shard
+
+        return state
+    
+    # 恢复checkpoint
+    def load_state_dict(self, state):
+        if "current_position" not in state:
+            raise ValueError("Missing current_position in dataloader state")
+
+        if self.file_name is not None:
+            self.current_position = state["current_position"]
+            return
+
+        current_shard = state.get("current_shard", 0)
+
+        if not 0 <= current_shard < len(self.shards):
+            raise ValueError(
+                f"Invalid shard index {current_shard}, "
+                f"expected [0, {len(self.shards)})"
+            )
+
+        self.current_shard = current_shard
+        self.token = load_tokens(self.shards[self.current_shard])
+        self.current_position = state["current_position"]

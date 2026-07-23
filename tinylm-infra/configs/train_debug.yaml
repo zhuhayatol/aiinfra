@@ -1,0 +1,39 @@
+experiment:
+  name: checkpoint_smoke_test
+  seed: 42
+  output_dir: outputs/checkpoint_smoke_test
+
+model:
+  block_size: 64
+  vocab_size: 50304
+  n_layer: 2
+  n_head: 2
+  n_embd: 128
+
+data:
+  data_dir: tinystories
+  batch_size: 2
+  sequence_length: 64
+
+training:
+  max_steps: 8
+  total_batch_size: 256
+  max_learning_rate: 0.0006
+  min_learning_rate: 0.00006
+  warmup_steps: 1
+  weight_decay: 0.1
+  gradient_clip: 1.0
+  dtype: bfloat16
+  use_compile: false
+
+evaluation:
+  eval_interval: 1
+  eval_steps: 1
+  run_hellaswag: false
+
+checkpoint:
+  save_interval: 1
+  save_optimizer: true
+  save_rng_state: true
+  save_dataloader_state: true
+  resume_from: null

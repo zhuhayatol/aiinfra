@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import inspect
+from pathlib import Path
 
 @dataclass
 class GPTConfig:
@@ -182,7 +183,7 @@ class GPT(nn.Module):
         return idx
 
     @classmethod
-    def from_pretrained(cls, model_type="gpt2", model_path=None):
+    def from_pretrained(cls, model_type="gpt2", model_path:str | Path | None=None):
 
         from transformers import GPT2LMHeadModel
 
@@ -200,9 +201,29 @@ class GPT(nn.Module):
         model = GPT(config)
 
         if model_path != None:
-            model_hf = GPT2LMHeadModel.from_pretrained(model_path)
+            model_path = Path(model_path).expanduser().resolve()
+
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Local pretrained model path does not exist: "
+                    f"{model_path}"
+                )
+
+            if not model_path.is_dir():
+                raise NotADirectoryError(
+                    f"Local pretrained model path must be a directory: "
+                    f"{model_path}"
+                )
+            
+            model_source = str(model_path)
+            
+            # 用户显式指定本地路径时，禁止静默访问网络。
+            model_hf = GPT2LMHeadModel.from_pretrained(model_source, local_files_only=True)
         else:
-            model_hf = GPT2LMHeadModel.from_pretrained(model_type)
+            # 没有指定本地目录时：
+            # Hugging Face 会使用本地缓存，缓存没有时再访问 Hub。
+            model_source = model_type 
+            model_hf = GPT2LMHeadModel.from_pretrained(model_source)
         
         # 模型中所有参数的字典
         # sd_hf是huggingface中的， sd是初始化模型之后的， 在加载hf的数据之前需要先对齐

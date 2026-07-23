@@ -992,7 +992,7 @@ checkpoint 当前用于 inference，不足以精确 resume。
 
 # 4.1 环境准备
 
-当前 `requirements.txt` 为空，应至少补充：
+当前 `requirements.txt` 
 
 ```text
 torch
