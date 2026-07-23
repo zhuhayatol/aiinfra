@@ -25,7 +25,7 @@ from tqdm import tqdm # pip install tqdm
 # ------------------------------------------
 dataset_path = "roneneldan/TinyStories"
 local_dir = "tinystories"
-shard_size = int(1e6) # 1M tokens per shard
+shard_size = int(2**20) # 1M tokens per shard
 
 # 往上俩级找到data目录，并在其下创建新的文件夹
 DATA_CACHE_DIR = os.path.abspath(

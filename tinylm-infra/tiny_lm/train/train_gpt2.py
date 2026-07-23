@@ -158,7 +158,7 @@ def main():
     # 验证数据集
     val_loader  = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, 
                              num_processes= ddp_world_size, split="val", local_dir=config.data.data_dir)
-    
+
     # 允许pytorch在执行float32的矩阵乘法的时候，采用tf32的精度来加速计算
     # torch.set_float32_matmul_precision("high")
 

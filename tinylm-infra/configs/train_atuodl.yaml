@@ -1,0 +1,43 @@
+
+experiment:
+  name: tinystories_124m_2gpu
+  seed: 42
+  output_dir: outputs/tinystories_124m_2gpu
+
+model:
+  block_size: 512
+  vocab_size: 50304
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+
+data:
+  data_dir: tinystories
+  batch_size: 32
+  sequence_length: 512
+
+training:
+  max_steps: 904
+  total_batch_size: 524288
+
+  max_learning_rate: 0.0006
+  min_learning_rate: 0.00006
+  warmup_steps: 32
+
+  weight_decay: 0.1
+  gradient_clip: 1.0
+
+  dtype: bfloat16
+  use_compile: false
+
+evaluation:
+  eval_interval: 200
+  eval_steps: 20
+  run_hellaswag: false
+
+checkpoint:
+  save_interval: 300
+  save_optimizer: true
+  save_rng_state: true
+  save_dataloader_state: true
+  resume_from: null
