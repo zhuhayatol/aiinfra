@@ -82,8 +82,6 @@ class TrainingConfig:
     # 常见值为 float32、float16、bfloat16。
     dtype: str = "bfloat16"
 
-    # 是否使用 torch.compile 编译模型。
-    use_compile: bool = False
 
 
 @dataclass

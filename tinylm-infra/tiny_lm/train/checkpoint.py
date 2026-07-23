@@ -171,19 +171,21 @@ def save_checkpoint(
 
     checkpoint: dict[str, Any] = {
         "model": raw_model.state_dict(),
-        "model_config": serialize_config(raw_model.config),
-        "train_config": serialize_config(config),
         "step": step,
     }
+    # GPT 模型通常具有 config 属性，但通用测试模型不一定具有。
+    # 只有模型确实提供配置时，才保存模型结构配置。
+    model_config = getattr(raw_model, "config", None)
+    if model_config is not None:
+        checkpoint["model_config"] = serialize_config(model_config)
+
+    # 完整训练配置由训练入口显式传入。
+    if config is not None:
+        checkpoint["train_config"] = serialize_config(config)
 
     # 只在调用方提供优化器时保存优化器状态。
     if optimizer is not None:
         checkpoint["optimizer"] = optimizer.state_dict()
-
-    # 配置不是所有模型都天然具备的属性，
-    # 因此应由训练入口显式传入。
-    if config is not None:
-        checkpoint["config"] = serialize_config(config)
 
     if val_loss is not None:
         checkpoint["val_loss"] = val_loss
