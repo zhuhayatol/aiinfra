@@ -28,7 +28,7 @@ training:
   gradient_clip: 1.0
 
   dtype: bfloat16
-  use_compile: false
+
 
 evaluation:
   eval_interval: 200

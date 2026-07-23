@@ -264,7 +264,7 @@ def main():
             print("未指定 Checkpoint:将从头训练")
 
     # 使用compile预先编译模型，加速训练
-    use_compile = config.training.use_compile
+    use_compile = False
     if use_compile:
         model = torch.compile(model)
 

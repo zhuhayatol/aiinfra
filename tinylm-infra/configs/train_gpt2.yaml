@@ -18,7 +18,7 @@ data:
   sequence_length: 512
 
 training:
-  max_steps: 50
+  max_steps: 10
   total_batch_size: 16384
 
   max_learning_rate: 0.0006
@@ -29,7 +29,7 @@ training:
   gradient_clip: 1.0
 
   dtype: bfloat16
-  use_compile: false
+
 
 evaluation:
   eval_interval: 50

@@ -10,7 +10,7 @@ from tiny_lm.model.gpt2 import GPT, GPTConfig
 
 
 # 默认从 log 文件夹里找最新的 checkpoint
-LOG_DIR = Path("outputs/gpt2_tinystories/checkpoints")
+LOG_DIR = Path("outputs/tinystories_124m_2gpu/checkpoints")
 
 
 def find_latest_checkpoint(log_dir=LOG_DIR):
